@@ -4,12 +4,13 @@ using UnityEngine;
 /// <summary>
 /// The global survival countdown. Counts down only while Playing.
 /// By default it is one continuous countdown: food and water do NOT add time.
+/// When it reaches zero without a win, the player dies.
 /// Attach to the same object as GameManager.
 /// </summary>
 public class SurvivalTimer : MonoBehaviour
 {
     [SerializeField] private float maxTime = 180f;
-    [SerializeField] private string gameOverMessage = "You ran out of time.\nYou never found food or water.";
+    [SerializeField] private string gameOverMessage = "You ran out of time.\nYou did not find both food and water.";
 
     [Tooltip("OFF = one continuous countdown. ON = food/water add their Refill Seconds back.")]
     [SerializeField] private bool allowRefill = false;
@@ -35,7 +36,7 @@ public class SurvivalTimer : MonoBehaviour
 
         if (Remaining <= 0f)
         {
-            gm.GameOver(gameOverMessage);
+            gm.Die(gameOverMessage);   // collapse first, then Game Over
         }
     }
 

@@ -1,8 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// Third-person camera that follows the player from behind.
-/// Attach to the Main Camera.
+/// Third-person camera with mouse-look. Works with a visible, unlocked cursor.
+/// Attach to the Main Camera. The cursor is controlled by GameManager.
 /// </summary>
 public class FollowCamera : MonoBehaviour
 {
@@ -11,16 +11,28 @@ public class FollowCamera : MonoBehaviour
     [SerializeField] private Transform target;
 
     [Header("Position")]
-    [SerializeField] private float distance = 5f;      // how far behind the player
-    [SerializeField] private float height = 2.5f;      // how high above the player
-    [SerializeField] private float lookHeight = 1.5f;  // point on the player to look at
+    [SerializeField] private float distance = 5f;       // how far behind the player
+    [SerializeField] private float lookHeight = 1.5f;   // point on the player to orbit around
+    [SerializeField] private float deathLookHeight = 0.4f;   // focus point once the player is dead
     [SerializeField] private float followSmoothness = 10f;
 
-    [Header("Mouse Turning")]
-    [Tooltip("Turn the player (and camera) left/right with the mouse.")]
+    [Header("Mouse Look")]
     [SerializeField] private bool turnWithMouse = true;
-    [SerializeField] private float mouseSensitivity = 3f;
-    [SerializeField] private bool lockCursor = true;
+    [SerializeField] private float mouseSensitivity = 3f;   // left / right (turns the player)
+    [SerializeField] private bool allowVerticalLook = true;
+    [SerializeField] private float verticalSensitivity = 2f;
+    [SerializeField] private bool invertY = false;
+    [SerializeField] private float startPitch = 15f;
+    [SerializeField] private float minPitch = -10f;
+    [SerializeField] private float maxPitch = 60f;
+
+    [Header("Keyboard Turn (backup when the pointer hits the screen edge)")]
+    [Tooltip("Degrees per second using Q (left) and E (right). 0 = off.")]
+    [SerializeField] private float keyTurnSpeed = 90f;
+
+    private float pitch;
+    private float yaw;
+    private float currentLookHeight;
 
     private void Start()
     {
@@ -37,31 +49,60 @@ public class FollowCamera : MonoBehaviour
             return;
         }
 
-        if (turnWithMouse && lockCursor)
+        if (GetComponent("CinemachineBrain") != null)
         {
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
+            Debug.LogWarning("FollowCamera: a CinemachineBrain is on this camera and will override it. Remove it.", this);
         }
+
+        pitch = startPitch;
+        yaw = target.eulerAngles.y;
+        currentLookHeight = lookHeight;
     }
 
     private void LateUpdate()
     {
-        // Rotate the player with the mouse (only while the game is running)
-        if (turnWithMouse && Time.timeScale > 0f)
+        GameManager gm = GameManager.Instance;
+        bool playing = gm == null || gm.State == GameState.Playing;
+        bool dead = gm != null && (gm.State == GameState.Dying || gm.State == GameState.GameOver);
+
+        // Look controls only work after Continue has been clicked
+        if (playing)
         {
-            target.Rotate(0f, Input.GetAxis("Mouse X") * mouseSensitivity, 0f);
+            if (turnWithMouse)
+            {
+                target.Rotate(0f, Input.GetAxis("Mouse X") * mouseSensitivity, 0f);
+
+                if (allowVerticalLook)
+                {
+                    float my = Input.GetAxis("Mouse Y") * verticalSensitivity * (invertY ? -1f : 1f);
+                    pitch = Mathf.Clamp(pitch - my, minPitch, maxPitch);
+                }
+            }
+
+            if (keyTurnSpeed > 0f)
+            {
+                float key = (Input.GetKey(KeyCode.E) ? 1f : 0f) - (Input.GetKey(KeyCode.Q) ? 1f : 0f);
+                if (key != 0f) target.Rotate(0f, key * keyTurnSpeed * Time.deltaTime, 0f);
+            }
+
+            // Only read the player's facing while playing (it is unreliable when he lies down)
+            yaw = target.eulerAngles.y;
         }
 
-        // Desired spot: behind and above the player
-        Vector3 desiredPos = target.position
-                           - target.forward * distance
-                           + Vector3.up * height;
+        // On death the focus point drops from head height down to the body
+        float wantedHeight = dead ? deathLookHeight : lookHeight;
+        currentLookHeight = Mathf.MoveTowards(currentLookHeight, wantedHeight, 2f * Time.unscaledDeltaTime);
+
+        // Orbit position: behind the player, rotated by yaw and pitch
+        Vector3 pivot = target.position + Vector3.up * currentLookHeight;
+        Quaternion orbit = Quaternion.Euler(pitch, yaw, 0f);
+        Vector3 desiredPos = pivot + orbit * new Vector3(0f, 0f, -distance);
 
         // Smoothly move there (frame-rate independent)
         float t = 1f - Mathf.Exp(-followSmoothness * Time.unscaledDeltaTime);
         transform.position = Vector3.Lerp(transform.position, desiredPos, t);
 
         // Always look at the player
-        transform.LookAt(target.position + Vector3.up * lookHeight);
+        transform.LookAt(pivot);
     }
 }
